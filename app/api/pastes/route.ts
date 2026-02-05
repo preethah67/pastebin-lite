@@ -1,47 +1,28 @@
 import { NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
-import { z } from 'zod';
 import { redis } from '@/lib/redis';
-
-// Validate input requirements [cite: 43, 44, 45, 46]
-const pasteSchema = z.object({
-  content: z.string().min(1),
-  ttl_seconds: z.number().int().min(1).optional(),
-  max_views: z.number().int().min(1).optional(),
-});
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const result = pasteSchema.safeParse(body);
+    const { content } = await request.json();
 
-    if (!result.success) {
-      return NextResponse.json({ error: "Invalid input" }, { status: 400 }); // [cite: 53]
+    if (!content) {
+      return NextResponse.json({ error: 'Content is required' }, { status: 400 });
     }
 
-    const { content, ttl_seconds, max_views } = result.data;
-    const id = uuidv4();
-    
-    const expires_at = ttl_seconds 
-      ? new Date(Date.now() + ttl_seconds * 1000).toISOString() 
-      : null;
-
-    // Store the data [cite: 86]
-    await redis.set(`paste:${id}`, {
+    const id = uuidv4().substring(0, 8);
+    const pasteData = {
+      id,
       content,
-      remaining_views: max_views ?? null, // [cite: 63]
-      expires_at
-    });
+      created_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hour expiry
+    };
 
-    if (ttl_seconds) {
-      await redis.expire(`paste:${id}`, ttl_seconds);
-    }
+    await redis.set(`paste:${id}`, pasteData);
 
-    const host = request.headers.get('host');
-    const url = `https://${host}/p/${id}`; // [cite: 51]
-
-    return NextResponse.json({ id, url }, { status: 201 }); // [cite: 50, 51]
+    return NextResponse.json({ id });
   } catch (error) {
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+    console.error('API Error:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
